@@ -1,2 +1,2 @@
-# 641_Observational_Techniques-
+# 641_Observational_Techniques
 Projects for the course 
