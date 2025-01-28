@@ -3,6 +3,7 @@ from astropy.io import fits
 from matplotlib import pyplot as plt  
 from matplotlib.colors import LogNorm
 import numpy as np  
+from scipy.signal import find_peaks
 
 def read_fits(
     file_path: str,
@@ -16,7 +17,7 @@ def read_fits(
     
     if print_header:
         print(repr(header))
-        
+
     return file
 
 
@@ -118,3 +119,53 @@ def create_master_flat(
     # Combine the flat frames
     master_flat = np.median(np.array(flat_data), axis=0)
     return master_flat
+
+def find_maximum_peak_in_range(
+    data: np.ndarray,
+    start: int,
+    end: int,
+):
+    """ Find the maximum peak and corresponding pixel in the data."""
+    # Find the maximum value in the data
+    max_value = np.max(data)
+    # Find the position of the maximum value
+    peak = np.argmax(data[start:end])
+    return max_value, peak
+
+def find_peaks_in_threshold(
+    data: np.ndarray,
+    threshold_low: float,
+    threshold_high: float,
+):
+    """ Find peaks in the data above a certain threshold."""
+    # Find the peaks above the threshold
+    # Identify indices where the data is within the threshold range
+    valid_indices = np.where((data > threshold_low) & (data < threshold_high))[0]
+    
+    # Create a mask for the valid range to zero out data outside the threshold
+    masked_data = np.zeros_like(data)
+    masked_data[valid_indices] = data[valid_indices]
+    
+    # Find peaks in the masked data
+    peaks, _ = find_peaks(masked_data)
+    
+    # Get positions of the peaks
+    positions = peaks
+    
+    return peaks, positions
+
+def pixel_to_wavelength(
+    lambda0: float = 3053.5651855469,  
+    dlambda: float = 0.25,  
+    ref_pix: int = 1 
+):
+    """ Convert pixel number to wavelength."""
+    return lambda0 + (ref_pix - 1) * dlambda
+
+def wavelength_to_pixel(
+    lambda0: float = 3053.5651855469,  
+    dlambda: float = 0.25,  
+    wavelength: float = 0.0 
+):
+    """ Convert wavelength to pixel number."""
+    return int((wavelength - lambda0) / dlambda) + 1
