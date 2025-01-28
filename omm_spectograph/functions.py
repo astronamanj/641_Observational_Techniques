@@ -6,11 +6,17 @@ import numpy as np
 
 def read_fits(
     file_path: str,
+    print_header: bool = False, 
 ):
     """ Read in the data from a FITS file."""
     hdul = fits.open(file_path)
     file = hdul[0].data
+    header = hdul[0].header
     hdul.close()
+    
+    if print_header:
+        print(repr(header))
+        
     return file
 
 
@@ -45,6 +51,8 @@ def plot_fits(
     else:
         print("No data found in the FITS file.")
 
+        
+
 def spectrum(
     data: np.ndarray,
     position: int, 
@@ -56,6 +64,7 @@ def spectrum(
     # Sum the pixel values along the vertical axis
     spectrum = np.sum(slice_data, axis=0)
     return spectrum
+
 
 def create_master_bias(
     bias_files: list,
@@ -70,6 +79,7 @@ def create_master_bias(
     # Combine the bias frames
     master_bias = np.median(bias_data, axis=0)
     return master_bias
+
 
 def create_master_dark(
     dark_files: list,
