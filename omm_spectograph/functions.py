@@ -26,6 +26,7 @@ def plot_fits(
     data: np.ndarray,
     title: str,
     norm: LogNorm = LogNorm(),
+    flip_xaxis: bool = False,
 ):
     """ Plot the data from a FITS file."""
     if data is not None:
@@ -33,7 +34,7 @@ def plot_fits(
         # data = np.nan_to_num(data, nan=0.0)
         
         # Plot the data
-        fig, ax = plt.subplots(figsize=(15, 5))
+        fig, ax = plt.subplots(figsize=(20, 6))
 
         im = ax.imshow(
             data, 
@@ -45,11 +46,12 @@ def plot_fits(
         ax.set_title(title)
         ax.set_xlabel('X Pixels')
         ax.set_ylabel('Y Pixels')
+        if flip_xaxis:
+            ax.invert_xaxis()
 
         cbar = fig.colorbar(im, ax=ax, orientation='vertical', pad = 0.025)
         cbar.set_label('Pixel Intensity')
 
-        plt.show()
     else:
         print("No data found in the FITS file.")
 
