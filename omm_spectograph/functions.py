@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LogNorm
 import numpy as np  
 from scipy.signal import find_peaks
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 def read_fits(
     file_path: str,
@@ -52,6 +53,15 @@ def plot_fits(
     else:
         print("No data found in the FITS file.")
 
+def create_inset(arc_spectrum, ax, x0, x1, y0, y1, x, y):
+    """ Create an inset plot in the main plot."""
+    ax_inset = inset_axes(ax, width="15%", height="30%", bbox_to_anchor=(x, y, 1, 1), bbox_transform=ax.transAxes, loc='upper left')
+    ax_inset.plot(arc_spectrum, color='black')
+    ax_inset.set_xlim(x0, x1)
+    ax_inset.set_ylim(y0, y1)
+    ax_inset.set_yticks([])
+    # ax_inset.tick_params(axis='x', direction='out', pad=-15)
+    # ax_inset.tick_params(left=False, right=False, labelleft=False)
         
 
 def spectrum(
@@ -127,10 +137,10 @@ def find_maximum_peak_in_range(
 ):
     """ Find the maximum peak and corresponding pixel in the data."""
     # Find the maximum value in the data
-    max_value = np.max(data)
+    max_value = np.max(data[start:end])
     # Find the position of the maximum value
     peak = np.argmax(data[start:end])
-    return max_value, peak
+    return max_value, start + peak
 
 def find_peaks_in_threshold(
     data: np.ndarray,
