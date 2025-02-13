@@ -53,13 +53,23 @@ def plot_fits(
     else:
         print("No data found in the FITS file.")
 
-def create_inset(arc_spectrum, ax, x0, x1, y0, y1, x, y):
+def create_inset(arc_spectrum, ax, start, end, x, y):
     """ Create an inset plot in the main plot."""
-    ax_inset = inset_axes(ax, width="15%", height="30%", bbox_to_anchor=(x, y, 1, 1), bbox_transform=ax.transAxes, loc='upper left')
-    ax_inset.plot(arc_spectrum, color='black')
-    ax_inset.set_xlim(x0, x1)
-    ax_inset.set_ylim(y0, y1)
+    ax_inset = inset_axes(
+        ax, 
+        width="15%", 
+        height="30%", 
+        bbox_to_anchor=(x, y, 1, 1), 
+        bbox_transform=ax.transAxes, 
+        loc='upper left'
+    )
+    ax_inset.plot(
+        arc_spectrum / np.max(arc_spectrum[start:end]), 
+        color='black'
+    )
+    ax_inset.set_xlim(start, end)
     ax_inset.set_yticks([])
+    ax_inset.set_ylim(0, 1)
     # ax_inset.tick_params(axis='x', direction='out', pad=-15)
     # ax_inset.tick_params(left=False, right=False, labelleft=False)
         
@@ -68,12 +78,16 @@ def spectrum(
     data: np.ndarray,
     position: int, 
     width: int, 
+    negative_vals: bool = False,    
 ):
     """ Extract a spectrum from the data given a Y position and width."""
     # Take a vertical slice of the data
     slice_data = data[position:position + width, :]
     # Sum the pixel values along the vertical axis
     spectrum = np.sum(slice_data, axis=0)
+    # Remove negative values
+    if negative_vals:
+        spectrum[spectrum < 0] = 0
     return spectrum
 
 
