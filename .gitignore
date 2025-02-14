@@ -3,6 +3,6 @@ omm_spectograph/Project_1.pdf
 omm_spectograph/__pycache__
 
 chime_pulsar_search/__pycache__
-chime_pulsar_search/data
+chime_pulsar_search/data/
 chime_pulsar_search/calibrator_source_masked_f1_t32.fil
 chime_pulsar_search/calibrator_source_masked.fil
