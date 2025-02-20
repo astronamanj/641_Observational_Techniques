@@ -4,6 +4,8 @@ from astropy.io import fits
 from matplotlib import pyplot as plt  
 from matplotlib.colors import LogNorm, Normalize
 
+from scipy import stats
+
 from rich.pretty import Pretty
 from sigpyproc.readers import FilReader
 
