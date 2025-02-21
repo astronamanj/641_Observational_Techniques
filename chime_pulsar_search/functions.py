@@ -31,3 +31,22 @@ def flux_density(
 )-> float:
     """Calculate the flux density in Jy"""
     return ref_flux * (freq / ref_freq) ** spectral_index
+
+def normalize_data_per_channel(
+        data_array: np.ndarray, 
+        mask: np.ndarray, 
+        invert_mask: bool = False, 
+):
+    if invert_mask:
+        mask = ~mask
+
+    # Compute mean and standard deviation per channel (across time bins), filtering out bad channels
+    mean = np.mean(data_array[mask, :], axis=1)
+    std = np.std(data_array[mask, :], axis=1)
+
+    # Normalize only the valid frequency channels
+    norm_array = np.copy(data_array)
+    norm_array[mask, :] = (data_array[mask, :] - mean[:, np.newaxis]) / std[:, np.newaxis]
+    norm_array[mask, :] = np.nan
+
+    return norm_array
