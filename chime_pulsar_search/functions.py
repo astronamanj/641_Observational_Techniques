@@ -9,6 +9,20 @@ from scipy import stats
 from rich.pretty import Pretty
 from sigpyproc.readers import FilReader
 
+# matplot_kwargs = {
+#         'fontsize': 18,
+#         'figure.figsize': (10, 6),
+#         'axes.labelsize': 14,
+#         'axes.titlesize': 16,
+#         'xtick.labelsize': 12,
+#         'ytick.labelsize': 12,
+#         'legend.fontsize': 12,
+#         'legend.loc': 'best',
+#         'grid.color': 'gray',
+#         'grid.linestyle': '--',
+#         'grid.linewidth': 0.5
+# }
+
 def flux_density(
         freq: float,
         ref_freq: float = 400,
