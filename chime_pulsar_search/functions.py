@@ -40,13 +40,11 @@ def normalize_data_per_channel(
     if invert_mask:
         mask = ~mask
 
-    # Compute mean and standard deviation per channel (across time bins), filtering out bad channels
     mean = np.mean(data_array[mask, :], axis=1)
     std = np.std(data_array[mask, :], axis=1)
 
-    # Normalize only the valid frequency channels
     norm_array = np.copy(data_array)
     norm_array[mask, :] = (data_array[mask, :] - mean[:, np.newaxis]) / std[:, np.newaxis]
-    norm_array[mask, :] = np.nan
+#     norm_array[mask, :] = data_array[mask, :] / mean[:, np.newaxis]
 
     return norm_array
