@@ -1,11 +1,14 @@
 import astropy
 import numpy as np  
-from scipy.ndimage import uniform_filter1d
+
 from astropy.io import fits
 from matplotlib import pyplot as plt  
 from matplotlib.colors import LogNorm, Normalize
 
 from scipy import stats, fft
+from scipy.signal import gaussian
+from scipy.ndimage import uniform_filter1d
+
 from rich.pretty import Pretty
 from sigpyproc.readers import FilReader
 
@@ -99,22 +102,80 @@ def plot_mean_spectrum(
     plt.legend(['Original', 'Masked'])
     plt.show()
 
+
 def plot_timeseries(
     pulsar_32, 
     pulsar_32_array, 
     freq_mask,
+    type : str = "mean", 
     title: str = 'Pulsar Time Series'
 ):
     fig = plt.figure(figsize=(10, 6))
-    plt.plot(
-        np.arange(pulsar_32.header.nsamples) * pulsar_32.header.tsamp,
-        np.nanmean(pulsar_32_array[~freq_mask, :], axis=0)
-    )
-    plt.ylabel('ADC [ul]', fontsize=18)
+    if type == "mean":
+        plt.plot(
+            np.arange(pulsar_32.header.nsamples) * pulsar_32.header.tsamp,
+            np.nanmean(pulsar_32_array[~freq_mask, :], axis=0)
+        )
+    elif type == "sum":
+        plt.plot(
+            np.arange(pulsar_32.header.nsamples) * pulsar_32.header.tsamp,
+            np.nansum(pulsar_32_array[~freq_mask, :], axis=0)
+        )
+    plt.ylabel(f'{type} ADC [ul]', fontsize=18)
     plt.xlabel('Time [s]', fontsize=18)
     plt.title(title, fontsize=14)
     plt.show()
 
+
+def plot_heatmap(
+    results : dict, 
+    metric : str = "corr", 
+):
+    dm_values    = np.sort(list({dm for dm, width in results.keys()}))
+    width_values = np.sort(list({width for dm, width in results.keys()}))
+
+    heatmap = np.zeros((len(width_values), len(dm_values)))
+
+    for i, width in enumerate(width_values):
+        for j, dm in enumerate(dm_values):
+            heatmap[i, j] = np.max(
+                np.array(results[(dm, width)][metric], dtype=np.float32)
+            )
+
+    plt.figure(figsize=(10, 6))
+    im = plt.imshow(
+        heatmap,
+        aspect='auto',
+        interpolation='nearest',
+        extent=[dm_values.min(), dm_values.max(),
+                width_values.min(), width_values.max()],
+        origin='lower'
+    )
+    cbar = plt.colorbar(im)
+    cbar.set_label("Correlation Strength", fontsize=14)
+    plt.xlabel('Dispersion Measure (DM)', fontsize=16)
+    plt.ylabel('Boxcar Width (samples)', fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+def get_correlations(results): 
+    correlations = [np.max(data["corr"]) for data in results.values()]
+    print(f"Ratio of max with median: {np.max(correlations)/np.median(correlations)}")
+    print(f"Ratio of max with mean: {np.max(correlations)/np.mean(correlations)}")
+
+    upper_bound = np.percentile(correlations, 99)
+
+    # Plot the histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(correlations, bins=100, alpha=0.7, color='blue', edgecolor='black')
+    # plt.axvline(lower_bound, color='red', linestyle='--', label='99% Confidence Interval')
+    plt.axvline(upper_bound, color='red', linestyle='--', label='99% Confidence Interval')
+    plt.axvline(np.max(correlations), color='red', linestyle='-', linewidth=2, label='Max Correlation')
+    plt.xlabel('Correlation Values', fontsize=16)
+    plt.ylabel('Frequency', fontsize=16)
+    # plt.title('Histogram of Correlations', fontsize=16)
+    plt.legend(fontsize=14)
+    plt.show()
 
 def read_and_downsize_data(
     file : str = "./data/data_261146047.fil",
@@ -178,10 +239,10 @@ def get_noise_stats(
     Compute the noise statistics of the pulsar data.  
     """
     # Compute the baseline (median along frequency axis for each time bin)
-    baseline = np.nanmean(pulsar_data_32.data[~freq_mask, :], axis=0)
+    baseline = np.nansum(pulsar_data_32.data[~freq_mask, :], axis=0)
 
     # Subtract the baseline from the original data to get the zeroed data
-    zeroed = pulsar_data_32.data - baseline
+    zeroed = pulsar_data_32.data - np.nanmean(pulsar_data_32.data[~freq_mask, :], axis=0)
 
     # Calculate the noise standard deviation along the frequency axis for each time bin
     noise_std = np.std(zeroed, axis=0)
@@ -231,54 +292,26 @@ def get_noise_stats(
     return baseline, zeroed, noise_std
 
 
-def compute_score(
-    data : dict, 
-    alpha : float, 
-    beta : float, 
-    sn_min : float, 
-    sn_max : float, 
-    stds_min : float, 
-    stds_max : float, 
-):
-    # Normalize SNR and noise std values
-    sn_norm = (data["sn"] - sn_min) / (sn_max - sn_min) if sn_max > sn_min else 0
-    stds_norm = (data["stds"] - stds_min) / (stds_max - stds_min) if stds_max > stds_min else 0
-    return alpha * sn_norm + beta * stds_norm
-
 def get_best_parameters(
-    alpha : float, 
-    beta : float, 
     results : dict,
+    metric : str, 
     tsamp : float, 
-    sn_min : float, 
-    sn_max : float, 
-    stds_min : float, 
-    stds_max : float,
 ):
-    # Find the best (dm, width) pair by maximizing the combined score
     (best_dm, best_width), best_data = max(
-        results.items(), 
-        key=lambda kv: np.max(compute_score(kv[1], alpha, beta, sn_min, sn_max, stds_min, stds_max))
+        results.items(),
+        key=lambda kv: np.max(np.array(kv[1][metric], dtype=np.float32))
     )
-    
-    # Locate the index of the maximum score within the best candidate
-    scores = compute_score(best_data, alpha, beta, sn_min, sn_max, stds_min, stds_max)
-    idx = np.argmax(scores)
-    
-    # Extract the corresponding best time and additional details
-    best_time = best_data["midtimes"][idx]
-    best_snr = best_data["sn"][idx]
-    best_noise_std = best_data["stds"][idx]
-    max_score = scores[idx]
-    
-    # Convert the best width to seconds using tsamp
-    best_width_sec = best_width * tsamp
-    
-    return best_dm, best_width_sec, best_time, best_snr, best_noise_std, max_score
+    best_snr = best_data["sn"]
+    best_time = best_data["midtimes"]
+
+    print(f"Best DM: {best_dm}, Best Width: {best_width * tsamp}, Max SNR: {best_snr}")
+    return best_dm, best_width, best_snr
 
 
-def compute_injection_results(
-    inj_32, 
+def boxcart_fit(
+    data_32, 
+    data_data_32, 
+    freq_mask,
     dm_range, 
     width_range, 
     baseline, 
@@ -288,7 +321,8 @@ def compute_injection_results(
     
     for dm in dm_range:
         # Dedisperse the injected data and subtract the baseline
-        time_series = inj_32.dedisperse(dm).data
+        baseline = np.average(np.nansum(data_data_32.data[~freq_mask, :], axis=0))
+        time_series = data_32.dedisperse(dm).data
         zeroed = time_series - baseline  
 
         for width in width_range:
@@ -297,10 +331,11 @@ def compute_injection_results(
             squared_averages = uniform_filter1d(zeroed**2, size=width, mode='nearest')
             stds = np.sqrt(np.abs(squared_averages - averages**2))
             sums = np.convolve(zeroed, np.ones(width), mode='valid')
-            snr = sums / (noise_std * np.sqrt(width))
+            total_noise = noise_std * width
+            snr = sums / (total_noise * np.sqrt(width))
 
             # Compute midtimes for the windowed sums
-            midtimes = (np.arange(sums.size) + (width - 1) / 2) * inj_32.header.tsamp
+            midtimes = (np.arange(sums.size) + (width - 1) / 2) * data_32.header.tsamp
 
             # Store computed metrics in the results dictionary
             results[(dm, width)] = {
@@ -308,50 +343,49 @@ def compute_injection_results(
                 "sums": sums,
                 "averages": averages[:len(sums)],  
                 "stds": stds[:len(sums)],  
-                "sn": snr
+                "sn": snr, 
             }
     return results
 
-def plot_heatmap(
-    results : dict, 
-    alpha : float,
-    beta : float,
-    sn_min : float,
-    sn_max : float,
-    stds_min : float,
-    stds_max : float
+
+def gaussian_fit(
+    data_32, 
+    data_data_32, 
+    freq_mask,
+    dm_range, 
+    width_range, 
 ):
-    dm_values    = np.sort(list({dm for dm, width in results.keys()}))
-    width_values = np.sort(list({width for dm, width in results.keys()}))
+    results = {}
 
-    heatmap = np.zeros((len(width_values), len(dm_values)))
+    for dm in dm_range:
+        # Dedisperse the injected data and subtract the baseline
+        baseline = np.average(np.nansum(data_data_32.data[~freq_mask, :], axis=0))
+        time_series = data_32.dedisperse(dm).data
+        zeroed = time_series - baseline  
+        noise_std = np.std(zeroed, axis=0)
 
-    for i, width in enumerate(width_values):
-        for j, dm in enumerate(dm_values):
-            heatmap[i, j] = np.max(
-                compute_score(
-                    results[(dm, width)], 
-                    alpha, 
-                    beta, 
-                    sn_min, 
-                    sn_max, 
-                    stds_min, 
-                    stds_max
-                )
-            )
+        for width in width_range:
+            # Create Gaussian template
+            gauss_template = gaussian(len(zeroed), std=width)
+            gauss_template *= np.max(zeroed) 
 
-    plt.figure(figsize=(10, 6))
-    im = plt.imshow(
-        heatmap,
-        aspect='auto',
-        interpolation='nearest',
-        extent=[dm_values.min(), dm_values.max(),
-                width_values.min(), width_values.max()],
-        origin='lower'
-    )
-    cbar = plt.colorbar(im)
-    cbar.set_label("Combined Score", fontsize=14)
-    plt.xlabel('Dispersion Measure (DM)', fontsize=16)
-    plt.ylabel('Boxcar Width (samples)', fontsize=16)
-    plt.tight_layout()
-    plt.show()
+            # Compute correlation with Gaussian template
+            corr = np.correlate(zeroed, gauss_template, mode='full')
+
+            # Compute the snr
+            weighted_integral = np.dot(np.abs(zeroed), gauss_template)
+            norm_factor = noise_std * np.sqrt(np.sum(gauss_template**2))
+            snr = weighted_integral / norm_factor
+
+            # Compute midtimes for the windowed sums
+            midtimes = (np.arange(corr.size) + (len(zeroed) - 1) / 2) * data_32.header.tsamp
+
+            # Store computed metrics in the results dictionary
+            results[(dm, width)] = {
+                "midtimes": midtimes,
+                "corr": corr,
+                "sn": snr, 
+
+            }
+
+    return results
