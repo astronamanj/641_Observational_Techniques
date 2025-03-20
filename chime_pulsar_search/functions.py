@@ -375,7 +375,7 @@ def gaussian_fit(
             # Compute the snr
             weighted_integral = np.dot(np.abs(zeroed), gauss_template)
             norm_factor = noise_std * np.sqrt(np.sum(gauss_template**2))
-            snr = weighted_integral / norm_factor
+            snr = weighted_integral / np.mean(noise_std)
 
             # Compute midtimes for the windowed sums
             midtimes = (np.arange(corr.size) + (len(zeroed) - 1) / 2) * data_32.header.tsamp
