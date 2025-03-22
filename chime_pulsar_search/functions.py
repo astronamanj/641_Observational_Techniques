@@ -1,7 +1,11 @@
 import astropy
-import numpy as np  
+import numpy as np 
+import random 
 
 from astropy.io import fits
+
+import pandas as pd
+import seaborn as sns
 from matplotlib import pyplot as plt  
 from matplotlib.colors import LogNorm, Normalize
 
@@ -68,13 +72,24 @@ def normalize_data_per_channel(
     return norm_array
 
 def plot_waterfall(
-    pulsar_array, 
+    data_array, 
+    freq_mask = None,
     title: str = 'Pulsar Source Waterfall Plot', 
+    vmin : float = None, 
+    vmax : float = None
 ):
     fig = plt.figure(figsize=(10, 6))
-    im = plt.imshow(pulsar_array, aspect='auto', interpolation='nearest')
+    if freq_mask is None:
+        freq_mask = np.zeros(data_array.shape[0], dtype=bool
+    )
+    im = plt.imshow(data_array[~freq_mask, :], aspect='auto', interpolation='nearest')
     cbar = plt.colorbar(im)
     cbar.set_label('ADC units', fontsize=14)
+    if vmin is not None and vmax is not None:
+        im.set_clim(vmin, vmax)
+    else:
+        # cbar.set_clim(np.nanmin(data_array), np.nanmax(data_array))
+        pass
     plt.title(title, fontsize=14)
     plt.xlabel('Time [samples]', fontsize=18)
     plt.ylabel('Freq. [channel]', fontsize=18)
@@ -103,24 +118,25 @@ def plot_mean_spectrum(
     plt.show()
 
 
+def get_time_series(
+    source_data_array, 
+    freq_mask,
+    type : str = "mean"
+):
+    if type == "mean":
+        return np.nanmean(source_data_array[~freq_mask, :], axis=0)
+    elif type == "sum":
+        return np.nansum(source_data_array[~freq_mask, :], axis=0)
+
+
 def plot_timeseries(
-    pulsar_32, 
-    pulsar_32_array, 
+    source_data_array, 
     freq_mask,
     type : str = "mean", 
     title: str = 'Pulsar Time Series'
 ):
     fig = plt.figure(figsize=(10, 6))
-    if type == "mean":
-        plt.plot(
-            np.arange(pulsar_32.header.nsamples) * pulsar_32.header.tsamp,
-            np.nanmean(pulsar_32_array[~freq_mask, :], axis=0)
-        )
-    elif type == "sum":
-        plt.plot(
-            np.arange(pulsar_32.header.nsamples) * pulsar_32.header.tsamp,
-            np.nansum(pulsar_32_array[~freq_mask, :], axis=0)
-        )
+    plt.plot(get_time_series(source_data_array, freq_mask, type))
     plt.ylabel(f'{type} ADC [ul]', fontsize=18)
     plt.xlabel('Time [s]', fontsize=18)
     plt.title(title, fontsize=14)
@@ -217,7 +233,7 @@ def read_and_downsize_data(
     # Downsample the data
     outfile_name = outfile_name.replace(".fil", "_f1_t32.fil")
     pulsar_masked.downsample(
-        tfactor = 32, 
+        tfactor = tfactor, 
         outfile_name = outfile_name
     )
     pulsar_32 = FilReader(outfile_name) 
@@ -349,8 +365,7 @@ def boxcart_fit(
 
 
 def gaussian_fit(
-    data_32, 
-    data_data_32, 
+    source_data, 
     freq_mask,
     dm_range, 
     width_range, 
@@ -359,33 +374,24 @@ def gaussian_fit(
 
     for dm in dm_range:
         # Dedisperse the injected data and subtract the baseline
-        baseline = np.average(np.nansum(data_data_32.data[~freq_mask, :], axis=0))
-        time_series = data_32.dedisperse(dm).data
-        zeroed = time_series - baseline  
-        noise_std = np.std(zeroed, axis=0)
+        dedispersed = source_data.dedisperse(dm).data
+        time_series = get_time_series(dedispersed, freq_mask, "sum")
 
         for width in width_range:
             # Create Gaussian template
-            gauss_template = gaussian(len(zeroed), std=width)
-            gauss_template *= np.max(zeroed) 
+            gauss_template = gaussian(len(time_series), std=width)
+            # gauss_template = gauss_template* np.max(time_series)/ np.sum(gauss_template)
 
             # Compute correlation with Gaussian template
-            corr = np.correlate(zeroed, gauss_template, mode='full')
-
-            # Compute the snr
-            weighted_integral = np.dot(np.abs(zeroed), gauss_template)
-            norm_factor = noise_std * np.sqrt(np.sum(gauss_template**2))
-            snr = weighted_integral / np.mean(noise_std)
+            corr = np.convolve(time_series, gauss_template, mode='same')
 
             # Compute midtimes for the windowed sums
-            midtimes = (np.arange(corr.size) + (len(zeroed) - 1) / 2) * data_32.header.tsamp
+            midtimes = np.arange(len(time_series)) * source_data.header.tsamp
 
             # Store computed metrics in the results dictionary
             results[(dm, width)] = {
                 "midtimes": midtimes,
-                "corr": corr,
-                "sn": snr, 
-
+                "corr": np.abs(corr),
             }
 
     return results
