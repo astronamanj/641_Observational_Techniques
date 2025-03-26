@@ -1,3 +1,18 @@
+"""
+This module contains the functions used in the CHIME pulsar search project. 
+
+Functions:
+    flux_density: Calculate the flux density in Jy
+    normalize_data_per_channel: Normalize the data per channel
+    plot_waterfall: Plot the waterfall plot of the data
+    plot_mean_spectrum: Plot the mean spectrum of the data
+    get_time_series: Get the time series of the data
+    plot_timeseries: Plot the time series of the data
+    plot_heatmap: Plot the heatmap of the data
+    read_and_downsize_data: Read and downsize the data
+    gaussian_fit: Fit a Gaussian to the data
+"""
+
 import astropy
 import numpy as np 
 import random 
@@ -16,34 +31,12 @@ from scipy.ndimage import uniform_filter1d
 from rich.pretty import Pretty
 from sigpyproc.readers import FilReader
 
-import os, sys, builtins, contextlib
-from contextlib import contextmanager
-
 freqs = np.linspace(800, 400, 1024)
+dm_range = np.linspace(-200, -5, 200) 
+width_range = np.arange(4, 200, 4)    
+dm_bin_width = dm_range[1] - dm_range[0]
+tfactor = 8
 
-@contextmanager
-def suppress_sigpyproc():
-    orig_open  = builtins.open
-    orig_write = os.write
-
-    def fake_open(path, *args, **kwargs):
-        if path == '/dev/tty':
-            return orig_open(os.devnull, 'w')
-        return orig_open(path, *args, **kwargs)
-
-    def fake_write(fd, data):
-        if fd in (1, 2):
-            return len(data)   # swallow output
-        return orig_write(fd, data)
-
-    builtins.open = fake_open
-    os.write      = fake_write
-
-    try:
-        yield
-    finally:
-        builtins.open = orig_open
-        os.write      = orig_write
 
 def flux_density(
         freq: float,
@@ -123,6 +116,8 @@ def get_time_series(
     freq_mask,
     type : str = "mean"
 ):
+    if freq_mask is None:
+        freq_mask = np.zeros(source_data_array.shape[0], dtype=bool)
     if type == "mean":
         return np.nanmean(source_data_array[~freq_mask, :], axis=0)
     elif type == "sum":
@@ -170,28 +165,10 @@ def plot_heatmap(
     cbar = plt.colorbar(im)
     cbar.set_label("Correlation Strength", fontsize=14)
     plt.xlabel('Dispersion Measure (DM)', fontsize=16)
-    plt.ylabel('Boxcar Width (samples)', fontsize=16)
+    plt.ylabel('Width (samples)', fontsize=16)
     plt.tight_layout()
     plt.show()
 
-def get_correlations(results): 
-    correlations = [np.max(data["corr"]) for data in results.values()]
-    print(f"Ratio of max with median: {np.max(correlations)/np.median(correlations)}")
-    print(f"Ratio of max with mean: {np.max(correlations)/np.mean(correlations)}")
-
-    upper_bound = np.percentile(correlations, 99)
-
-    # Plot the histogram
-    plt.figure(figsize=(10, 6))
-    plt.hist(correlations, bins=100, alpha=0.7, color='blue', edgecolor='black')
-    # plt.axvline(lower_bound, color='red', linestyle='--', label='99% Confidence Interval')
-    plt.axvline(upper_bound, color='red', linestyle='--', label='99% Confidence Interval')
-    plt.axvline(np.max(correlations), color='red', linestyle='-', linewidth=2, label='Max Correlation')
-    plt.xlabel('Correlation Values', fontsize=16)
-    plt.ylabel('Frequency', fontsize=16)
-    # plt.title('Histogram of Correlations', fontsize=16)
-    plt.legend(fontsize=14)
-    plt.show()
 
 def read_and_downsize_data(
     file : str = "./data/data_261146047.fil",
@@ -247,122 +224,6 @@ def read_and_downsize_data(
 
     return pulsar_32, pulsar_data_32, freq_mask
 
-def get_noise_stats(
-    pulsar_data_32, 
-    freq_mask
-):
-    """
-    Compute the noise statistics of the pulsar data.  
-    """
-    # Compute the baseline (median along frequency axis for each time bin)
-    baseline = np.nansum(pulsar_data_32.data[~freq_mask, :], axis=0)
-
-    # Subtract the baseline from the original data to get the zeroed data
-    zeroed = pulsar_data_32.data - np.nanmean(pulsar_data_32.data[~freq_mask, :], axis=0)
-
-    # Calculate the noise standard deviation along the frequency axis for each time bin
-    noise_std = np.std(zeroed, axis=0)
-
-    # Scale the data by the noise standard deviation, guarding against division by zero
-    scaled_data = zeroed / np.where(noise_std == 0, 1, noise_std)
-
-    # Plot 1: Original data, baseline-subtracted data, noise std, and scaled data
-    plt.figure(figsize=(12, 8))
-
-    # Original data
-    plt.subplot(2, 2, 1)
-    plt.imshow(pulsar_data_32.data, aspect='auto', origin='lower')
-    plt.colorbar()
-    plt.title("Original Data")
-
-    # Baseline-subtracted (zeroed) data
-    plt.subplot(2, 2, 2)
-    plt.imshow(zeroed, aspect='auto', origin='lower')
-    plt.colorbar()
-    plt.title("Baseline-Subtracted Data")
-
-    # Noise standard deviation as a function of time
-    plt.subplot(2, 2, 3)
-    plt.plot(noise_std, marker='o', linestyle='-')
-    plt.xlabel("Time Bin")
-    plt.ylabel("Noise Std")
-    plt.title("Noise Standard Deviation vs Time")
-
-    # Scaled data (noise normalized)
-    plt.subplot(2, 2, 4)
-    plt.imshow(scaled_data, aspect='auto', origin='lower')
-    plt.colorbar()
-    plt.title("Scaled Data (Noise Normalized)")
-
-    plt.tight_layout()
-    plt.show()
-
-    # Histogram of scaled data values to inspect distribution
-    # plt.figure(figsize=(6, 4))
-    # plt.hist(scaled_data.flatten(), bins=50, density=True)
-    # plt.xlabel("Scaled Data Value")
-    # plt.ylabel("Density")
-    # plt.title("Histogram of Scaled Data")
-    # plt.show()
-
-    return baseline, zeroed, noise_std
-
-
-def get_best_parameters(
-    results : dict,
-    metric : str, 
-    tsamp : float, 
-):
-    (best_dm, best_width), best_data = max(
-        results.items(),
-        key=lambda kv: np.max(np.array(kv[1][metric], dtype=np.float32))
-    )
-    best_snr = best_data["sn"]
-    best_time = best_data["midtimes"]
-
-    print(f"Best DM: {best_dm}, Best Width: {best_width * tsamp}, Max SNR: {best_snr}")
-    return best_dm, best_width, best_snr
-
-
-def boxcart_fit(
-    data_32, 
-    data_data_32, 
-    freq_mask,
-    dm_range, 
-    width_range, 
-    baseline, 
-    noise_std
-):
-    results = {}
-    
-    for dm in dm_range:
-        # Dedisperse the injected data and subtract the baseline
-        baseline = np.average(np.nansum(data_data_32.data[~freq_mask, :], axis=0))
-        time_series = data_32.dedisperse(dm).data
-        zeroed = time_series - baseline  
-
-        for width in width_range:
-            # Compute the metrics
-            averages = uniform_filter1d(zeroed, size=width, mode='nearest')
-            squared_averages = uniform_filter1d(zeroed**2, size=width, mode='nearest')
-            stds = np.sqrt(np.abs(squared_averages - averages**2))
-            sums = np.convolve(zeroed, np.ones(width), mode='valid')
-            total_noise = noise_std * width
-            snr = sums / (total_noise * np.sqrt(width))
-
-            # Compute midtimes for the windowed sums
-            midtimes = (np.arange(sums.size) + (width - 1) / 2) * data_32.header.tsamp
-
-            # Store computed metrics in the results dictionary
-            results[(dm, width)] = {
-                "midtimes": midtimes,
-                "sums": sums,
-                "averages": averages[:len(sums)],  
-                "stds": stds[:len(sums)],  
-                "sn": snr, 
-            }
-    return results
-
 
 def gaussian_fit(
     source_data, 
@@ -376,11 +237,12 @@ def gaussian_fit(
         # Dedisperse the injected data and subtract the baseline
         dedispersed = source_data.dedisperse(dm).data
         time_series = get_time_series(dedispersed, freq_mask, "sum")
+        # time_series -= np.median(time_series)
 
         for width in width_range:
             # Create Gaussian template
             gauss_template = gaussian(len(time_series), std=width)
-            # gauss_template = gauss_template* np.max(time_series)/ np.sum(gauss_template)
+            # gauss_template /= np.sum(gauss_template)  # Normalize template to sum=1
 
             # Compute correlation with Gaussian template
             corr = np.convolve(time_series, gauss_template, mode='same')
